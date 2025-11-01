@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Calculator</title>
+  <style>
+    body { font-family: system-ui,Segoe UI,Roboto,Arial; margin:2rem; color:#111; }
+    .card { max-width:700px; margin:0 auto; padding:1.5rem; border-radius:12px; box-shadow:0 6px 20px rgba(0,0,0,0.08); }
+    button { padding:0.6rem 1rem; border-radius:8px; border:1px solid #ccc; background:#f8f8f8; }
+    input, .output { width:100%; padding:0.6rem; margin-top:0.5rem; border-radius:8px; border:1px solid #ddd; }
+    .controls { display:flex; gap:0.5rem; margin-top:1rem; }
+    .transcript { white-space:pre-wrap; min-height:48px; border:1px solid #ddd; padding:0.5rem; border-radius:8px; margin-top:0.5rem; }
+     
+    body{
+       background-image:url(./image.png);background-size: 1400px;
+     }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Voice Calculator</h1>
+    <p>Click <strong>Start Listening</strong> and speak commands like: "add 4 and 2", "subtract 5 from 10", "multiply 3 by 4", "divide 10 by 2", "2 to the power of 5"</p>
+    <div class="controls">
+      <button id="startBtn">Start Listening</button>
+      <button id="stopBtn" disabled>Stop</button>
+      <button id="clearBtn">Clear</button>
+    </div>
+
+    <label>Transcript</label>
+    <div id="transcript" class="transcript"></div>
+
+    <label>Parsed Operation</label>
+    <input id="parsed" readonly />
+
+    <label>Result</label>
+    <div id="result" class="output"></div>
+
+    <hr />
+    <small>Works best in Chrome/Edge. If your browser doesn't support SpeechRecognition, it will fall back to typing.</small>
+  </div>
+
+<script>
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const clearBtn = document.getElementById('clearBtn');
+const transcriptEl = document.getElementById('transcript');
+const parsedEl = document.getElementById('parsed');
+const resultEl = document.getElementById('result');
+const backendUrl = 'http://localhost:5000/compute';
+
+// --- Parse voice command ---
+function parseCommand(text){
+  text = text.toLowerCase();
+  const nums = text.match(/-?\d+(\.\d+)?/g);
+  if(nums && nums.length>=2){
+    if(text.includes('add') || text.includes('plus')) return {operation:'add', a: nums[0], b: nums[1]};
+    if(text.includes('subtract') || text.includes('minus')) return {operation:'subtract', a: nums[0], b: nums[1]};
+    if(text.includes('multiply') || text.includes('times') || text.includes('x')) return {operation:'multiply', a: nums[0], b: nums[1]};
+    if(text.includes('divide') || text.includes('divided')) return {operation:'divide', a: nums[0], b: nums[1]};
+    if(text.includes('power') || text.includes('raised') || text.includes('to the power')) return {operation:'power', a: nums[0], b: nums[1]};
+    if(text.includes('mod') || text.includes('remainder')) return {operation:'mod', a: nums[0], b: nums[1]};
+  }
+  return null;
+}
+
+// --- Send compute request to backend ---
+async function sendCompute(op,a,b){
+  parsedEl.value = `${op} ${a} ${b}`;
+  try{
+    const resp = await fetch(backendUrl, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({operation:op,a:a,b:b})
+    });
+    const j = await resp.json();
+    if(resp.ok){
+      resultEl.textContent = j.result;
+      speak(`The result is ${j.result}`);
+    } else {
+      resultEl.textContent = 'Error: ' + (j.error || 'unknown');
+      speak('Error. ' + (j.error || 'unknown error'));
+    }
+  } catch(err){
+    resultEl.textContent = 'Could not reach backend: ' + err.message;
+    speak('Could not reach backend');
+  }
+}
+
+// --- Text-to-speech ---
+function speak(text){
+  if('speechSynthesis' in window){
+    const u = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+  }
+}
+
+// --- Speech recognition ---
+let recognition = null;
+let listening = false;
+if(window.webkitSpeechRecognition || window.SpeechRecognition){
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SR();
+  recognition.lang = 'en-US';
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
+
+  recognition.onresult = (ev)=>{
+    const text = ev.results[0][0].transcript;
+    transcriptEl.textContent += '\n' + text;
+    const parsed = parseCommand(text);
+    if(parsed){
+      sendCompute(parsed.operation, parsed.a, parsed.b);
+    } else {
+      resultEl.textContent = 'Could not parse command. Try: "add 4 and 2"';
+      speak('I did not understand. Try saying, add four and two');
+    }
+  }
+
+  recognition.onend = ()=>{
+    listening = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+
+  recognition.onerror = (e)=>{
+    resultEl.textContent = 'Recognition error: ' + e.error;
+    listening = false;
+    startBtn.disabled = false;
+    stopBtn.disabled = true;
+  }
+}
+
+// --- Button listeners ---
+startBtn.addEventListener('click', ()=>{
+  if(!recognition){ alert('Speech recognition not supported in this browser. Use Chrome or Edge.'); return; }
+  transcriptEl.textContent = '';
+  resultEl.textContent = '';
+  parsedEl.value = '';
+  recognition.start();
+  listening = true;
+  startBtn.disabled = true;
+  stopBtn.disabled = false;
+});
+
+stopBtn.addEventListener('click', ()=>{
+  if(recognition && listening) recognition.stop();
+});
+
+clearBtn.addEventListener('click', ()=>{
+  transcriptEl.textContent = '';
+  parsedEl.value = '';
+  resultEl.textContent = '';
+});
+</script>
+
+</body>
+</html>
